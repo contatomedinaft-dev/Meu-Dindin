@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Transaction, ChatMessage, Forecast, User, TransactionType } from './types';
+import { Transaction, Forecast, User, TransactionType, UserRole } from './types';
 import * as StorageService from './services/storage';
 import * as GeminiService from './services/gemini';
 import Dashboard from './components/Dashboard';
 import MonthlySheet from './components/MonthlySheet';
 import DebtManager from './components/DebtManager';
 import TransactionForm from './components/TransactionForm';
-import AuthScreen from './components/AuthScreen';
-import { LayoutDashboard, Table2, Download, RefreshCw, Menu, X, Trash2, Calendar, AlertCircle, FileWarning, Plus, LogOut, UserCircle2, Pencil } from 'lucide-react';
+import SettingsModal from './components/SettingsModal';
+import { Table2, RefreshCw, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [isLoadingForecast, setIsLoadingForecast] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
   // Global Date Filter
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -27,12 +28,23 @@ const App: React.FC = () => {
   const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
-  // Check User Session on Mount
+  // Initialize Session on Mount
   useEffect(() => {
-    const user = StorageService.getUserSession();
-    if (user) {
-      handleLogin(user);
+    let user = StorageService.getUserSession();
+    
+    // Auto-create guest user if none exists
+    if (!user) {
+        user = {
+            id: `guest_${Date.now()}`,
+            name: 'Visitante',
+            familyId: 'meu-planejamento', // Default workspace
+            familyName: 'Meu Planejamento',
+            role: UserRole.PRIMARY
+        };
+        StorageService.saveUserSession(user);
     }
+    
+    handleLogin(user);
   }, []);
 
   const loadDataForUser = useCallback(() => {
@@ -47,11 +59,16 @@ const App: React.FC = () => {
     loadDataForUser();
   };
 
+  const handleUpdateUser = (updatedUser: User) => {
+    handleLogin(updatedUser);
+    setShowSettings(false);
+  };
+
   const handleLogout = () => {
     StorageService.logoutUser();
-    setCurrentUser(null);
-    setTransactions([]);
-    setForecast(null);
+    // Re-trigger initialization by reloading page or resetting state
+    // Ideally we just reload to let the useEffect create a new guest session
+    window.location.reload(); 
   };
 
   const updateForecast = useCallback(async (data: Transaction[]) => {
@@ -148,8 +165,9 @@ const App: React.FC = () => {
   const formatMoney = (val: number) => 
     val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  // Loading state
   if (!currentUser) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando...</div>;
   }
 
   return (
@@ -214,7 +232,7 @@ const App: React.FC = () => {
 
             <div className="hidden lg:flex items-center gap-3">
                {/* User Badge */}
-               <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full">
+               <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200">
                  <div className={`w-2 h-2 rounded-full ${currentUser.role === 'PRIMARY' ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
                  <span className="text-sm font-semibold text-gray-700 max-w-[100px] truncate">{currentUser.name}</span>
                </div>
@@ -227,10 +245,20 @@ const App: React.FC = () => {
                  Lançar
                </button>
                
+               <div className="h-6 w-px bg-gray-200 mx-1"></div>
+
+               <button 
+                 onClick={() => setShowSettings(true)}
+                 className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                 title="Configurações"
+               >
+                 <Settings className="w-5 h-5" />
+               </button>
+
                <button 
                  onClick={handleLogout}
-                 className="p-2 text-gray-400 hover:text-rose-600 transition-colors"
-                 title="Sair"
+                 className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                 title="Sair / Resetar"
                >
                  <LogOut className="w-5 h-5" />
                </button>
@@ -259,8 +287,11 @@ const App: React.FC = () => {
           <div className="lg:hidden bg-white border-b border-gray-200">
             <div className="pt-2 pb-3 space-y-1 px-2">
               <div className="px-3 py-2 flex items-center justify-between border-b border-gray-100 mb-2">
-                  <span className="font-bold text-gray-700">{currentUser.name}</span>
-                  <button onClick={handleLogout} className="text-xs text-rose-500 font-medium">Sair</button>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-gray-700">{currentUser.name}</span>
+                    <button onClick={() => {setShowSettings(true); setMobileMenuOpen(false)}} className="p-1 text-gray-400 hover:text-blue-600"><Settings className="w-4 h-4" /></button>
+                  </div>
+                  <button onClick={handleLogout} className="text-xs text-rose-500 font-medium flex items-center gap-1"><LogOut className="w-3 h-3"/> Sair</button>
               </div>
               <button onClick={() => {setActiveTab('dashboard'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Dashboard</button>
               <button onClick={() => {setActiveTab('sheet'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Planilha</button>
@@ -444,6 +475,15 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && currentUser && (
+          <SettingsModal 
+              user={currentUser} 
+              onClose={() => setShowSettings(false)} 
+              onSave={handleUpdateUser} 
+          />
       )}
 
       {/* Manual Transaction Form Modal (New or Edit) */}
