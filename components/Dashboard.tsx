@@ -6,13 +6,11 @@ import { ArrowUpCircle, ArrowDownCircle, Wallet, TrendingUp, Calendar as Calenda
 
 interface DashboardProps {
   transactions: Transaction[];
-  forecast: any;
-  isLoadingForecast: boolean;
   currentDate: Date;
   onDateChange: (date: Date) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ transactions, forecast, isLoadingForecast, currentDate, onDateChange }) => {
+const Dashboard: React.FC<DashboardProps> = ({ transactions, currentDate, onDateChange }) => {
   
   // Handlers for Month Navigation
   const prevMonth = () => {
@@ -216,57 +214,29 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, forecast, isLoading
           </div>
         </div>
 
-        {/* Next Events & Forecast */}
-        <div className="space-y-6">
-           {/* Next Installments */}
-           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-              <div className="flex items-center gap-2 mb-4">
-                <Clock className="w-5 h-5 text-blue-500" />
-                <h4 className="text-lg font-semibold text-gray-800">Próximos Vencimentos</h4>
-              </div>
-              <div className="space-y-3">
-                {upcomingEvents.length > 0 ? upcomingEvents.map(t => (
-                  <div key={t.id} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-lg transition-colors border-b border-gray-50 last:border-0">
-                     <div className="flex items-center gap-3">
-                       <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-                       <div>
-                          <p className="text-sm font-medium text-gray-800">{t.description}</p>
-                          <p className="text-xs text-gray-500">{new Date(t.date).toLocaleDateString('pt-BR')} • {t.category}</p>
-                       </div>
-                     </div>
-                     <span className={`text-sm font-bold ${t.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {formatMoney(t.amount)}
-                     </span>
-                  </div>
-                )) : (
-                   <p className="text-sm text-gray-400">Nenhum lançamento futuro registrado.</p>
-                )}
-              </div>
+        {/* Next Events */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+           <div className="flex items-center gap-2 mb-4">
+             <Clock className="w-5 h-5 text-blue-500" />
+             <h4 className="text-lg font-semibold text-gray-800">Próximos Vencimentos</h4>
            </div>
-
-           {/* AI Forecast (Small) */}
-           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md">
-                <div className="flex items-center gap-2 mb-4">
-                  <TrendingUp className="w-5 h-5 text-emerald-400" />
-                  <h4 className="text-lg font-semibold">Análise IA</h4>
-                </div>
-                
-                {isLoadingForecast ? (
-                  <div className="animate-pulse space-y-3">
-                    <div className="h-4 bg-slate-700 rounded w-3/4"></div>
-                    <div className="h-4 bg-slate-700 rounded w-1/2"></div>
-                  </div>
-                ) : forecast ? (
+           <div className="space-y-3">
+             {upcomingEvents.length > 0 ? upcomingEvents.map(t => (
+               <div key={t.id} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-lg transition-colors border-b border-gray-50 last:border-0">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
                     <div>
-                      <p className="text-sm italic text-slate-200 leading-relaxed mb-2">"{forecast.advice}"</p>
-                      <div className="flex justify-between text-xs text-slate-400 border-t border-white/10 pt-2 mt-2">
-                         <span>Previsão baseada no histórico</span>
-                         <span>{forecast.confidence} confiança</span>
-                      </div>
+                       <p className="text-sm font-medium text-gray-800">{t.description}</p>
+                       <p className="text-xs text-gray-500">{new Date(t.date).toLocaleDateString('pt-BR')} • {t.category}</p>
                     </div>
-                ) : (
-                  <p className="text-sm text-slate-400">Adicione dados para análise.</p>
-                )}
+                  </div>
+                  <span className={`text-sm font-bold ${t.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                     {formatMoney(t.amount)}
+                  </span>
+               </div>
+             )) : (
+                <p className="text-sm text-gray-400">Nenhum lançamento futuro registrado.</p>
+             )}
            </div>
         </div>
 

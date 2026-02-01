@@ -1,22 +1,19 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Transaction, Forecast, User, TransactionType, UserRole } from './types';
+import { Transaction, User, TransactionType, UserRole } from './types';
 import * as StorageService from './services/storage';
-import * as GeminiService from './services/gemini';
 import Dashboard from './components/Dashboard';
 import MonthlySheet from './components/MonthlySheet';
 import DebtManager from './components/DebtManager';
 import TransactionForm from './components/TransactionForm';
 import SettingsModal from './components/SettingsModal';
-import { Table2, RefreshCw, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings } from 'lucide-react';
+import { Table2, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'sheet' | 'debts'>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [forecast, setForecast] = useState<Forecast | null>(null);
-  const [isLoadingForecast, setIsLoadingForecast] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -50,7 +47,6 @@ const App: React.FC = () => {
   const loadDataForUser = useCallback(() => {
     const loaded = StorageService.getTransactions();
     setTransactions(loaded);
-    updateForecast(loaded); 
   }, []);
 
   const handleLogin = (user: User) => {
@@ -67,16 +63,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     StorageService.logoutUser();
     // Re-trigger initialization by reloading page or resetting state
-    // Ideally we just reload to let the useEffect create a new guest session
     window.location.reload(); 
   };
-
-  const updateForecast = useCallback(async (data: Transaction[]) => {
-    setIsLoadingForecast(true);
-    const prediction = await GeminiService.generateFinancialForecast(data);
-    setForecast(prediction);
-    setIsLoadingForecast(false);
-  }, []);
 
   const handleSaveSheetTransactions = (newTransactions: Transaction[], idsToDelete?: string[]) => {
     if (!currentUser) return;
@@ -98,7 +86,6 @@ const App: React.FC = () => {
     // 3. Reload
     const updatedList = StorageService.getTransactions();
     setTransactions(updatedList);
-    updateForecast(updatedList);
   };
 
   const handleManualTransactionSave = (newTransactions: Transaction[]) => {
@@ -116,7 +103,6 @@ const App: React.FC = () => {
 
       const updatedList = StorageService.getTransactions();
       setTransactions(updatedList);
-      updateForecast(updatedList);
       setEditingTransaction(null);
   };
 
@@ -311,21 +297,11 @@ const App: React.FC = () => {
             <div className="mb-6 flex justify-between items-end">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Visão Geral ({currentUser.familyName})</h1>
-                <p className="text-sm text-gray-500">Acompanhe o balanço do mês e previsões.</p>
+                <p className="text-sm text-gray-500">Acompanhe o balanço do mês e movimentações.</p>
               </div>
-              <button 
-                onClick={() => updateForecast(transactions)}
-                disabled={isLoadingForecast}
-                className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-                title="Atualizar Previsão"
-              >
-                <RefreshCw className={`w-5 h-5 ${isLoadingForecast ? 'animate-spin' : ''}`} />
-              </button>
             </div>
             <Dashboard 
               transactions={transactions} 
-              forecast={forecast} 
-              isLoadingForecast={isLoadingForecast} 
               currentDate={currentDate}
               onDateChange={setCurrentDate}
             />
