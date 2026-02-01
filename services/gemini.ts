@@ -1,9 +1,8 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Transaction, TransactionType, Forecast } from '../types';
 
 // Initialize Gemini Client
-// Note: In a real app, you might handle the key more securely, but for this demo 
-// we rely on the environment variable as per instructions.
 const apiKey = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
 
@@ -22,8 +21,17 @@ export const parseTransactionFromText = async (text: string): Promise<Partial<Tr
       model: modelId,
       contents: `
         Hoje é ${currentDate}.
-        Analise o seguinte texto do usuário e extraia os dados financeiros.
-        Se o texto não contiver uma transação financeira clara, retorne um objeto com valores nulos ou vazios.
+        Analise o texto do usuário para extrair uma transação financeira.
+        
+        REGRAS DE PARCELAMENTO:
+        1. Se o usuário mencionar parcelamento (ex: "em 10x", "10 vezes", "parcelado em 5"), assuma que o valor monetário citado é o VALOR TOTAL.
+        2. Você deve dividir o valor total pelo número de parcelas.
+        3. O campo 'amount' deve conter o resultado da divisão (Valor da Parcela).
+        4. O campo 'installments' deve conter a quantidade de parcelas.
+        
+        Exemplo: "Gastei 1000 na TV em 10x" -> amount: 100, installments: 10.
+        Exemplo: "Uber de 20 reais" -> amount: 20, installments: 1.
+
         Texto: "${text}"
       `,
       config: {
@@ -32,11 +40,12 @@ export const parseTransactionFromText = async (text: string): Promise<Partial<Tr
           type: Type.OBJECT,
           properties: {
             isValid: { type: Type.BOOLEAN, description: "True se for uma transação financeira válida" },
-            amount: { type: Type.NUMBER, description: "Valor monetário absoluto" },
+            amount: { type: Type.NUMBER, description: "Valor monetário da parcela (ou valor único)" },
             type: { type: Type.STRING, enum: ["INCOME", "EXPENSE"], description: "Tipo da transação" },
             category: { type: Type.STRING, description: "Categoria curta (ex: Alimentação, Transporte, Salário)" },
             description: { type: Type.STRING, description: "Descrição curta e clara" },
-            date: { type: Type.STRING, description: "Data da transação em formato ISO 8601 (YYYY-MM-DD)" }
+            date: { type: Type.STRING, description: "Data da transação em formato ISO 8601 (YYYY-MM-DD)" },
+            installments: { type: Type.NUMBER, description: "Quantidade de parcelas (padrão 1)" }
           },
           required: ["isValid"]
         }
@@ -54,7 +63,8 @@ export const parseTransactionFromText = async (text: string): Promise<Partial<Tr
       type: result.type === 'INCOME' ? TransactionType.INCOME : TransactionType.EXPENSE,
       category: result.category || 'Geral',
       description: result.description || 'Sem descrição',
-      date: result.date || new Date().toISOString()
+      date: result.date || new Date().toISOString(),
+      installmentTotal: result.installments && result.installments > 1 ? result.installments : undefined
     };
 
   } catch (error) {

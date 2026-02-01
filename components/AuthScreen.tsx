@@ -35,7 +35,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
       {/* Logo */}
-      <div className="flex flex-col items-center mb-8 animate-fade-in">
+      <div className="flex flex-col items-center mb-8 animate-fade-in text-center">
          <div className="relative w-24 h-24 mb-4">
            <div className="absolute inset-0 bg-yellow-700 rounded-full shadow-xl translate-y-2"></div>
            <div className="absolute inset-0 bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-600 rounded-full border-[4px] border-yellow-100 flex items-center justify-center shadow-inner">
@@ -43,10 +43,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
              <span className="text-yellow-50 font-serif font-black text-5xl drop-shadow-md">$</span>
            </div>
          </div>
-         <h1 className="text-4xl font-['Anton'] text-slate-800">
-            MEU <span className="text-emerald-600">DINDIN</span>
+         <h1 className="text-4xl font-['Anton'] text-emerald-700 tracking-wide">
+            ORGANIZEI<span className="text-rose-600">.APP</span>
          </h1>
-         <p className="text-gray-500 mt-2">Gestão Financeira Familiar Inteligente</p>
+         <p className="text-gray-500 mt-2 font-medium tracking-wide text-sm uppercase">GESTÃO FINANCEIRA FÁCIL PARA PESSOAS COMUNS</p>
       </div>
 
       <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-300 border border-gray-100">

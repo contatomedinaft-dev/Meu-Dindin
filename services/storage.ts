@@ -54,6 +54,16 @@ export const getTransactions = (): Transaction[] => {
   }
 };
 
+export const updateTransaction = (updatedTransaction: Transaction): void => {
+  const user = getUserSession();
+  if (!user) return;
+
+  const key = getStorageKey(user.familyId);
+  const current = getTransactions();
+  const updated = current.map(t => t.id === updatedTransaction.id ? updatedTransaction : t);
+  localStorage.setItem(key, JSON.stringify(updated));
+};
+
 export const deleteTransaction = (id: string): void => {
   const user = getUserSession();
   if (!user) return;
@@ -61,6 +71,16 @@ export const deleteTransaction = (id: string): void => {
   const key = getStorageKey(user.familyId);
   const current = getTransactions();
   const updated = current.filter(t => t.id !== id);
+  localStorage.setItem(key, JSON.stringify(updated));
+};
+
+export const deleteTransactions = (ids: string[]): void => {
+  const user = getUserSession();
+  if (!user) return;
+
+  const key = getStorageKey(user.familyId);
+  const current = getTransactions();
+  const updated = current.filter(t => !ids.includes(t.id));
   localStorage.setItem(key, JSON.stringify(updated));
 };
 

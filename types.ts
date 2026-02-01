@@ -76,12 +76,21 @@ export enum DebtStatus {
   PAID = 'PAID'
 }
 
+export enum DebtCategory {
+  UTILITY = 'UTILITY', // Contas de consumo (Luz, Água, etc) - Risco de corte
+  CREDIT_CARD = 'CREDIT_CARD',
+  LOAN = 'LOAN',
+  TAXES = 'TAXES', // IPTU, IPVA
+  OTHER = 'OTHER'
+}
+
 export interface Debt {
   id: string;
   creditor: string; // Quem recebe (Banco, Loja, Pessoa)
   originalValue: number;
   currentValue: number; // Valor com juros
   status: DebtStatus;
+  category?: DebtCategory; // Categoria da dívida
   dueDate?: string; // Data de vencimento ou da dívida
   description?: string;
   createdAt: number;

@@ -4,22 +4,19 @@ import { Transaction, ChatMessage, Forecast, User, TransactionType } from './typ
 import * as StorageService from './services/storage';
 import * as GeminiService from './services/gemini';
 import Dashboard from './components/Dashboard';
-import ChatInterface from './components/ChatInterface';
 import MonthlySheet from './components/MonthlySheet';
 import DebtManager from './components/DebtManager';
 import TransactionForm from './components/TransactionForm';
 import AuthScreen from './components/AuthScreen';
-import { LayoutDashboard, MessageSquareText, Table2, Download, RefreshCw, Menu, X, Trash2, Calendar, AlertCircle, FileWarning, Plus, LogOut, UserCircle2 } from 'lucide-react';
+import { LayoutDashboard, Table2, Download, RefreshCw, Menu, X, Trash2, Calendar, AlertCircle, FileWarning, Plus, LogOut, UserCircle2, Pencil } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'chat' | 'list' | 'sheet' | 'debts'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'sheet' | 'debts'>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [isLoadingForecast, setIsLoadingForecast] = useState(false);
-  const [isProcessingChat, setIsProcessingChat] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Global Date Filter
@@ -28,6 +25,7 @@ const App: React.FC = () => {
   // Modal States
   const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
   const [showTransactionForm, setShowTransactionForm] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   // Check User Session on Mount
   useEffect(() => {
@@ -41,14 +39,6 @@ const App: React.FC = () => {
     const loaded = StorageService.getTransactions();
     setTransactions(loaded);
     updateForecast(loaded); 
-    
-    setMessages([
-      { 
-        id: 'welcome', 
-        role: 'assistant', 
-        content: 'Olá! Sou seu assistente financeiro. Estou pronto para ajudar você e sua família.' 
-      }
-    ]);
   }, []);
 
   const handleLogin = (user: User) => {
@@ -71,69 +61,15 @@ const App: React.FC = () => {
     setIsLoadingForecast(false);
   }, []);
 
-  const handleSendMessage = async (text: string) => {
+  const handleSaveSheetTransactions = (newTransactions: Transaction[], idsToDelete?: string[]) => {
     if (!currentUser) return;
 
-    // Add user message
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: text };
-    setMessages(prev => [...prev, userMsg]);
-    setIsProcessingChat(true);
-
-    try {
-      // Call Gemini to parse
-      const parsed = await GeminiService.parseTransactionFromText(text);
-
-      if (parsed) {
-        // Create full transaction object
-        const newTransaction: Transaction = {
-          id: Date.now().toString(),
-          amount: parsed.amount!,
-          type: parsed.type!,
-          category: parsed.category!,
-          description: parsed.description!,
-          date: parsed.date!,
-          createdAt: Date.now(),
-          userId: currentUser.id,
-          userName: currentUser.name
-        };
-
-        // Save
-        StorageService.saveTransaction(newTransaction);
-        const updatedList = StorageService.getTransactions();
-        setTransactions(updatedList);
-
-        // Reply
-        const assistantMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: 'Entendido! Registrei a transação.',
-          relatedTransaction: newTransaction
-        };
-        setMessages(prev => [...prev, assistantMsg]);
-      } else {
-        // Fallback if not a transaction
-        const assistantMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: 'Desculpe, não identifiquei uma transação financeira clara. Tente dizer algo como "Gastei 30 na padaria".'
-        };
-        setMessages(prev => [...prev, assistantMsg]);
-      }
-    } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: 'Ocorreu um erro ao processar sua mensagem. Tente novamente.'
-      }]);
-    } finally {
-      setIsProcessingChat(false);
+    // 1. Remove replaced transactions (Editing logic)
+    if (idsToDelete && idsToDelete.length > 0) {
+        StorageService.deleteTransactions(idsToDelete);
     }
-  };
 
-  const handleSaveSheetTransactions = (newTransactions: Transaction[]) => {
-    if (!currentUser) return;
-    // Ensure all transactions have user data
+    // 2. Add new/updated transactions
     const enriched = newTransactions.map(t => ({
         ...t,
         userId: currentUser.id,
@@ -141,17 +77,30 @@ const App: React.FC = () => {
     }));
 
     enriched.forEach(t => StorageService.saveTransaction(t));
+    
+    // 3. Reload
     const updatedList = StorageService.getTransactions();
     setTransactions(updatedList);
     updateForecast(updatedList);
   };
 
   const handleManualTransactionSave = (newTransactions: Transaction[]) => {
-      newTransactions.forEach(t => StorageService.saveTransaction(t));
+      // Logic: Iterate through all incoming transactions.
+      // If a transaction matches the ID of the one we are editing, we UPDATE it.
+      // Any other transaction in the array (e.g., generated future installments) is treated as NEW.
+      
+      newTransactions.forEach(t => {
+          if (editingTransaction && t.id === editingTransaction.id) {
+              StorageService.updateTransaction(t);
+          } else {
+              StorageService.saveTransaction(t);
+          }
+      });
+
       const updatedList = StorageService.getTransactions();
       setTransactions(updatedList);
-      // Update forecast only if we added current month data to avoid unnecessary calls
       updateForecast(updatedList);
+      setEditingTransaction(null);
   };
 
   const handleExportCSV = () => {
@@ -164,6 +113,11 @@ const App: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleEditClick = (t: Transaction) => {
+    setEditingTransaction(t);
+    setShowTransactionForm(true);
   };
 
   const handleDeleteClick = (id: string) => {
@@ -222,8 +176,8 @@ const App: React.FC = () => {
                  </div>
                  
                  <div className="flex flex-col -space-y-1 justify-center h-full">
-                    <span className="text-3xl font-['Anton'] tracking-wide leading-none text-slate-800 drop-shadow-sm group-hover:text-slate-900 transition-colors">
-                      MEU <span className="text-emerald-600">DINDIN</span>
+                    <span className="text-3xl font-['Anton'] tracking-wide leading-none text-emerald-700 drop-shadow-sm group-hover:text-emerald-800 transition-colors">
+                      ORGANIZEI<span className="text-rose-600">.APP</span>
                     </span>
                  </div>
               </div>
@@ -244,12 +198,6 @@ const App: React.FC = () => {
                 Planilha Mensal
               </button>
               <button
-                onClick={() => setActiveTab('chat')}
-                className={`${activeTab === 'chat' ? 'border-blue-500 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium h-full transition-colors duration-200`}
-              >
-                Chat IA
-              </button>
-              <button
                 onClick={() => setActiveTab('list')}
                 className={`${activeTab === 'list' ? 'border-blue-500 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium h-full transition-colors duration-200`}
               >
@@ -260,7 +208,7 @@ const App: React.FC = () => {
                 className={`${activeTab === 'debts' ? 'border-rose-500 text-rose-600' : 'border-transparent text-gray-500 hover:text-rose-600'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium h-full gap-1 transition-colors duration-200`}
               >
                 <FileWarning className="w-4 h-4" />
-                Dívidas
+                Dívidas / Atrasos
               </button>
             </div>
 
@@ -272,7 +220,7 @@ const App: React.FC = () => {
                </div>
 
                <button 
-                 onClick={() => setShowTransactionForm(true)}
+                 onClick={() => { setEditingTransaction(null); setShowTransactionForm(true); }}
                  className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-slate-900 hover:bg-slate-800 focus:outline-none transition-all hover:shadow-md gap-2"
                >
                  <Plus className="w-4 h-4" />
@@ -291,7 +239,7 @@ const App: React.FC = () => {
             {/* Mobile menu button */}
             <div className="flex items-center lg:hidden gap-2">
               <button
-                 onClick={() => setShowTransactionForm(true)}
+                 onClick={() => { setEditingTransaction(null); setShowTransactionForm(true); }}
                  className="inline-flex items-center justify-center p-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800"
               >
                  <Plus className="w-5 h-5" />
@@ -316,9 +264,8 @@ const App: React.FC = () => {
               </div>
               <button onClick={() => {setActiveTab('dashboard'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Dashboard</button>
               <button onClick={() => {setActiveTab('sheet'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Planilha</button>
-              <button onClick={() => {setActiveTab('chat'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Chat</button>
               <button onClick={() => {setActiveTab('list'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Extrato</button>
-              <button onClick={() => {setActiveTab('debts'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-rose-600 hover:bg-rose-50 hover:border-rose-300 flex items-center gap-2"><FileWarning className="w-4 h-4"/> Dívidas</button>
+              <button onClick={() => {setActiveTab('debts'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-rose-600 hover:bg-rose-50 hover:border-rose-300 flex items-center gap-2"><FileWarning className="w-4 h-4"/> Dívidas / Atrasos</button>
               <button onClick={handleExportCSV} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-blue-600 hover:bg-blue-50 hover:border-blue-300">Exportar CSV</button>
             </div>
           </div>
@@ -379,21 +326,6 @@ const App: React.FC = () => {
                 onSaveTransactions={handleSaveSheetTransactions} 
             />
           </>
-        )}
-
-        {activeTab === 'chat' && (
-          <div className="max-w-3xl mx-auto">
-            <div className="mb-6">
-               <h1 className="text-2xl font-bold text-gray-900">Lançamentos via Chat</h1>
-               <p className="text-sm text-gray-500">Converse com a IA para registrar seus gastos variáveis (Uber, lanches, etc).</p>
-            </div>
-            <ChatInterface 
-              onSendMessage={handleSendMessage} 
-              messages={messages} 
-              isProcessing={isProcessingChat}
-              userName={currentUser.name}
-            />
-          </div>
         )}
 
         {activeTab === 'debts' && (
@@ -464,9 +396,14 @@ const App: React.FC = () => {
                         {t.type === TransactionType.INCOME ? '+' : '-'}{formatMoney(t.amount)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button onClick={() => handleDeleteClick(t.id)} className="text-gray-400 hover:text-rose-600 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex justify-end gap-2">
+                           <button onClick={() => handleEditClick(t)} className="text-gray-400 hover:text-blue-600 transition-colors" title="Editar">
+                             <Pencil className="w-4 h-4" />
+                           </button>
+                           <button onClick={() => handleDeleteClick(t.id)} className="text-gray-400 hover:text-rose-600 transition-colors" title="Excluir">
+                             <Trash2 className="w-4 h-4" />
+                           </button>
+                        </div>
                       </td>
                     </tr>
                   )) : (
@@ -509,11 +446,12 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Manual Transaction Form Modal */}
+      {/* Manual Transaction Form Modal (New or Edit) */}
       {showTransactionForm && (
         <TransactionForm 
-           onClose={() => setShowTransactionForm(false)} 
-           onSave={handleManualTransactionSave} 
+           onClose={() => { setShowTransactionForm(false); setEditingTransaction(null); }} 
+           onSave={handleManualTransactionSave}
+           initialData={editingTransaction}
         />
       )}
 
