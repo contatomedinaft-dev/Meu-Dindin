@@ -1,13 +1,14 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Transaction, User, TransactionType, UserRole } from './types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Transaction, User, TransactionType, UserRole, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from './types';
 import * as StorageService from './services/storage';
 import Dashboard from './components/Dashboard';
 import MonthlySheet from './components/MonthlySheet';
 import DebtManager from './components/DebtManager';
 import TransactionForm from './components/TransactionForm';
 import SettingsModal from './components/SettingsModal';
-import { Table2, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings } from 'lucide-react';
+import { Table2, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings, Upload, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -17,6 +18,10 @@ const App: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
+  // Import State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
   // Global Date Filter
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -105,6 +110,122 @@ const App: React.FC = () => {
       setTransactions(updatedList);
       setEditingTransaction(null);
   };
+
+  // --- EXCEL IMPORT LOGIC ---
+  const triggerFileUpload = () => {
+    if (fileInputRef.current) {
+        fileInputRef.current.click();
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    setIsImporting(true);
+
+    try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        if (jsonData.length < 2) {
+            alert('Arquivo vazio ou formato inválido.');
+            setIsImporting(false);
+            return;
+        }
+
+        // Simple Heuristic to find columns
+        const headers = (jsonData[0] as string[]).map(h => h.toString().toLowerCase());
+        const dateIdx = headers.findIndex(h => h.includes('data') || h.includes('date') || h.includes('dia'));
+        const descIdx = headers.findIndex(h => h.includes('desc') || h.includes('historico') || h.includes('histórico') || h.includes('estabelecimento'));
+        const amountIdx = headers.findIndex(h => h.includes('valor') || h.includes('amount') || h.includes('preço'));
+
+        if (dateIdx === -1 || amountIdx === -1) {
+            alert('Não foi possível identificar as colunas "Data" e "Valor" no seu Excel. Verifique o cabeçalho.');
+            setIsImporting(false);
+            return;
+        }
+
+        const newTransactions: Transaction[] = [];
+        let importedCount = 0;
+
+        // Iterate rows (skip header)
+        for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i] as any[];
+            if (!row || row.length === 0) continue;
+
+            let rawDate = row[dateIdx];
+            let rawAmount = row[amountIdx];
+            let description = descIdx !== -1 ? row[descIdx] : 'Importado Excel';
+
+            if (!rawDate || !rawAmount) continue;
+
+            // Handle Excel Date (Serial number) or String
+            let dateObj = new Date();
+            if (typeof rawDate === 'number') {
+                // Excel date serial conversion
+                dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
+            } else {
+                // Try parsing string
+                dateObj = new Date(rawDate);
+            }
+
+            // Handle Amount (Negative usually means expense in bank exports)
+            let amount = typeof rawAmount === 'string' ? parseFloat(rawAmount.replace('R$', '').replace('.', '').replace(',', '.')) : parseFloat(rawAmount);
+            if (isNaN(amount)) continue;
+
+            let type = TransactionType.INCOME;
+            if (amount < 0) {
+                type = TransactionType.EXPENSE;
+                amount = Math.abs(amount);
+            }
+
+            // Default category
+            const category = "Diversos";
+
+            newTransactions.push({
+                id: Date.now().toString() + Math.random().toString(),
+                amount: amount,
+                type: type,
+                category: category,
+                description: String(description || 'Sem descrição'),
+                date: dateObj.toISOString(),
+                createdAt: Date.now(),
+                userId: currentUser.id,
+                userName: currentUser.name
+            });
+            importedCount++;
+        }
+
+        if (importedCount > 0) {
+            newTransactions.forEach(t => StorageService.saveTransaction(t));
+            const updatedList = StorageService.getTransactions();
+            setTransactions(updatedList);
+            alert(`${importedCount} transações importadas com sucesso! Vá ao extrato para categorizá-las.`);
+            setActiveTab('list');
+        } else {
+            alert('Nenhuma transação válida encontrada.');
+        }
+
+    } catch (error) {
+        console.error("Erro na importação", error);
+        alert('Erro ao ler o arquivo. Certifique-se que é um Excel (.xlsx) ou CSV válido.');
+    } finally {
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // --- CATEGORY EDIT LOGIC ---
+  const handleQuickCategoryChange = (transaction: Transaction, newCategory: string) => {
+      const updated: Transaction = { ...transaction, category: newCategory };
+      StorageService.updateTransaction(updated);
+      // Update local state to reflect immediately
+      setTransactions(prev => prev.map(t => t.id === transaction.id ? updated : t));
+  };
+
 
   const handleExportCSV = () => {
     const csv = StorageService.exportToCSV();
@@ -212,11 +333,28 @@ const App: React.FC = () => {
                 className={`${activeTab === 'debts' ? 'border-rose-500 text-rose-600' : 'border-transparent text-gray-500 hover:text-rose-600'} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium h-full gap-1 transition-colors duration-200`}
               >
                 <FileWarning className="w-4 h-4" />
-                Dívidas / Atrasos
+                Dívidas
               </button>
             </div>
 
             <div className="hidden lg:flex items-center gap-3">
+               {/* Import Excel Button */}
+               <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  accept=".xlsx, .xls, .csv" 
+                  className="hidden" 
+               />
+               <button 
+                 onClick={triggerFileUpload}
+                 disabled={isImporting}
+                 className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors flex items-center gap-1"
+                 title="Importar Excel"
+               >
+                 {isImporting ? <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div> : <FileSpreadsheet className="w-5 h-5" />}
+               </button>
+
                {/* User Badge */}
                <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200">
                  <div className={`w-2 h-2 rounded-full ${currentUser.role === 'PRIMARY' ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
@@ -283,6 +421,7 @@ const App: React.FC = () => {
               <button onClick={() => {setActiveTab('sheet'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Planilha</button>
               <button onClick={() => {setActiveTab('list'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300">Extrato</button>
               <button onClick={() => {setActiveTab('debts'); setMobileMenuOpen(false)}} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-rose-600 hover:bg-rose-50 hover:border-rose-300 flex items-center gap-2"><FileWarning className="w-4 h-4"/> Dívidas / Atrasos</button>
+              <button onClick={triggerFileUpload} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-green-600 hover:bg-green-50 hover:border-green-300 flex items-center gap-2"><FileSpreadsheet className="w-4 h-4"/> Importar Excel</button>
               <button onClick={handleExportCSV} className="block pl-3 pr-4 py-2 border-l-4 text-base font-medium w-full text-left border-transparent text-blue-600 hover:bg-blue-50 hover:border-blue-300">Exportar CSV</button>
             </div>
           </div>
@@ -368,7 +507,7 @@ const App: React.FC = () => {
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria (Editar)</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsável</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
@@ -387,9 +526,25 @@ const App: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{t.description}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-800">
-                          {t.category}
-                        </span>
+                         {/* Quick Category Edit */}
+                         <div className="relative inline-block w-48">
+                            <select
+                                value={t.category}
+                                onChange={(e) => handleQuickCategoryChange(t, e.target.value)}
+                                className={`appearance-none w-full px-3 py-1 pr-8 rounded-full text-xs font-medium border-0 cursor-pointer focus:ring-2 focus:ring-offset-1 focus:outline-none transition-all ${
+                                    t.type === TransactionType.INCOME 
+                                    ? 'bg-blue-50 text-blue-800 hover:bg-blue-100 focus:ring-blue-500' 
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 focus:ring-gray-400'
+                                }`}
+                            >
+                                {(t.type === TransactionType.INCOME ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd"></path></svg>
+                            </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           <div className="flex items-center gap-1.5">
