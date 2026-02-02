@@ -1,13 +1,67 @@
-
-import { Transaction, TransactionType, Debt, User } from '../types';
+import { Transaction, TransactionType, Debt, User, DebtStatus, DebtCategory } from '../types';
+import { supabase } from './supabase';
 
 const USER_KEY = 'fin_ai_user_session';
 
-// Helper to get dynamic keys based on logged family
-const getStorageKey = (familyId: string) => `fin_ai_transactions_${familyId}`;
-const getDebtsKey = (familyId: string) => `fin_ai_debts_${familyId}`;
+// --- Helpers para Mapeamento (Snake Case DB <-> Camel Case App) ---
 
-// --- User Session ---
+const mapTransactionFromDB = (dbItem: any): Transaction => ({
+  id: dbItem.id,
+  amount: Number(dbItem.amount),
+  type: dbItem.type as TransactionType,
+  category: dbItem.category,
+  description: dbItem.description,
+  date: dbItem.date,
+  createdAt: Number(dbItem.created_at),
+  installmentCurrent: dbItem.installment_current || undefined,
+  installmentTotal: dbItem.installment_total || undefined,
+  userId: dbItem.user_id,
+  userName: dbItem.user_name
+});
+
+const mapTransactionToDB = (t: Transaction, familyId: string) => ({
+  id: t.id,
+  amount: t.amount,
+  type: t.type,
+  category: t.category,
+  description: t.description,
+  date: t.date,
+  created_at: t.createdAt,
+  installment_current: t.installmentCurrent || null,
+  installment_total: t.installmentTotal || null,
+  user_id: t.userId,
+  user_name: t.userName,
+  family_id: familyId
+});
+
+const mapDebtFromDB = (dbItem: any): Debt => ({
+  id: dbItem.id,
+  creditor: dbItem.creditor,
+  originalValue: Number(dbItem.original_value),
+  currentValue: Number(dbItem.current_value),
+  status: dbItem.status as DebtStatus,
+  category: dbItem.category as DebtCategory,
+  dueDate: dbItem.due_date,
+  description: dbItem.description,
+  createdAt: Number(dbItem.created_at),
+  userId: dbItem.user_id
+});
+
+const mapDebtToDB = (d: Debt, familyId: string) => ({
+  id: d.id,
+  creditor: d.creditor,
+  original_value: d.originalValue,
+  current_value: d.currentValue,
+  status: d.status,
+  category: d.category,
+  due_date: d.dueDate,
+  description: d.description,
+  created_at: d.createdAt,
+  user_id: d.userId,
+  family_id: familyId
+});
+
+// --- User Session (Mantém LocalStorage para persistência de login simples) ---
 
 export const saveUserSession = (user: User): void => {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
@@ -27,118 +81,128 @@ export const logoutUser = (): void => {
   localStorage.removeItem(USER_KEY);
 };
 
-// --- Transactions (Scoped by Family) ---
+// --- Transactions (Supabase) ---
 
-export const saveTransaction = (transaction: Transaction): void => {
+export const saveTransaction = async (transaction: Transaction): Promise<void> => {
   const user = getUserSession();
-  if (!user) return; // Safety check
+  if (!user) return;
 
-  const key = getStorageKey(user.familyId);
-  const current = getTransactions(); 
-  const updated = [transaction, ...current];
-  localStorage.setItem(key, JSON.stringify(updated));
+  const dbPayload = mapTransactionToDB(transaction, user.familyId);
+  
+  const { error } = await supabase
+    .from('transactions')
+    .upsert(dbPayload);
+
+  if (error) console.error('Error saving transaction:', error);
 };
 
-export const getTransactions = (): Transaction[] => {
+export const saveTransactionsBulk = async (transactions: Transaction[]): Promise<void> => {
+    const user = getUserSession();
+    if (!user) return;
+
+    const dbPayloads = transactions.map(t => mapTransactionToDB(t, user.familyId));
+
+    const { error } = await supabase
+        .from('transactions')
+        .upsert(dbPayloads);
+    
+    if (error) console.error('Error bulk saving:', error);
+};
+
+export const getTransactions = async (): Promise<Transaction[]> => {
   const user = getUserSession();
   if (!user) return [];
 
-  const key = getStorageKey(user.familyId);
-  const stored = localStorage.getItem(key);
-  if (!stored) return [];
-  try {
-    return JSON.parse(stored);
-  } catch (e) {
-    console.error("Failed to parse transactions", e);
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('family_id', user.familyId)
+    .order('date', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching transactions:', error);
     return [];
   }
+
+  return data.map(mapTransactionFromDB);
 };
 
-export const updateTransaction = (updatedTransaction: Transaction): void => {
+export const updateTransaction = async (updatedTransaction: Transaction): Promise<void> => {
+  // Same as save (upsert handles update based on PK)
+  await saveTransaction(updatedTransaction);
+};
+
+export const deleteTransaction = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('id', id);
+
+  if (error) console.error('Error deleting transaction:', error);
+};
+
+export const deleteTransactions = async (ids: string[]): Promise<void> => {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .in('id', ids);
+
+  if (error) console.error('Error deleting transactions:', error);
+};
+
+// --- Debts (Supabase) ---
+
+export const saveDebt = async (debt: Debt): Promise<void> => {
   const user = getUserSession();
   if (!user) return;
 
-  const key = getStorageKey(user.familyId);
-  const current = getTransactions();
-  const updated = current.map(t => t.id === updatedTransaction.id ? updatedTransaction : t);
-  localStorage.setItem(key, JSON.stringify(updated));
+  const dbPayload = mapDebtToDB(debt, user.familyId);
+  const { error } = await supabase
+    .from('debts')
+    .upsert(dbPayload);
+
+  if (error) console.error('Error saving debt:', error);
 };
 
-export const deleteTransaction = (id: string): void => {
-  const user = getUserSession();
-  if (!user) return;
-
-  const key = getStorageKey(user.familyId);
-  const current = getTransactions();
-  const updated = current.filter(t => t.id !== id);
-  localStorage.setItem(key, JSON.stringify(updated));
-};
-
-export const deleteTransactions = (ids: string[]): void => {
-  const user = getUserSession();
-  if (!user) return;
-
-  const key = getStorageKey(user.familyId);
-  const current = getTransactions();
-  const updated = current.filter(t => !ids.includes(t.id));
-  localStorage.setItem(key, JSON.stringify(updated));
-};
-
-// --- Debts (Scoped by Family) ---
-
-export const saveDebt = (debt: Debt): void => {
-  const user = getUserSession();
-  if (!user) return;
-
-  const key = getDebtsKey(user.familyId);
-  const current = getDebts();
-  const updated = [debt, ...current];
-  localStorage.setItem(key, JSON.stringify(updated));
-};
-
-export const getDebts = (): Debt[] => {
+export const getDebts = async (): Promise<Debt[]> => {
   const user = getUserSession();
   if (!user) return [];
 
-  const key = getDebtsKey(user.familyId);
-  const stored = localStorage.getItem(key);
-  if (!stored) return [];
-  try {
-    return JSON.parse(stored);
-  } catch (e) {
-    console.error("Failed to parse debts", e);
+  const { data, error } = await supabase
+    .from('debts')
+    .select('*')
+    .eq('family_id', user.familyId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching debts:', error);
     return [];
   }
+
+  return data.map(mapDebtFromDB);
 };
 
-export const updateDebt = (updatedDebt: Debt): void => {
-  const user = getUserSession();
-  if (!user) return;
-
-  const key = getDebtsKey(user.familyId);
-  const current = getDebts();
-  const updated = current.map(d => d.id === updatedDebt.id ? updatedDebt : d);
-  localStorage.setItem(key, JSON.stringify(updated));
+export const updateDebt = async (updatedDebt: Debt): Promise<void> => {
+  await saveDebt(updatedDebt);
 };
 
-export const deleteDebt = (id: string): void => {
-  const user = getUserSession();
-  if (!user) return;
-
-  const key = getDebtsKey(user.familyId);
-  const current = getDebts();
-  const updated = current.filter(d => d.id !== id);
-  localStorage.setItem(key, JSON.stringify(updated));
+export const deleteDebt = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('debts')
+    .delete()
+    .eq('id', id);
+    
+  if (error) console.error('Error deleting debt:', error);
 };
 
 // --- Helpers ---
 
-export const exportToCSV = (): string => {
-  const transactions = getTransactions();
+export const exportToCSV = (transactions: Transaction[]): string => {
+  // Requires transactions passed as arg since getTransactions is now async
   const headers = ["Data", "Descrição", "Categoria", "Tipo", "Valor", "Usuário", "Parcela"];
   const rows = transactions.map(t => [
     new Date(t.date).toLocaleDateString('pt-BR'),
-    `"${t.description}"`, // Quote to handle commas in description
+    `"${t.description}"`,
     t.category,
     t.type === TransactionType.INCOME ? "Receita" : "Despesa",
     t.amount.toFixed(2).replace('.', ','),

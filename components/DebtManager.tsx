@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect } from 'react';
 import { Debt, DebtStatus, DebtCategory } from '../types';
-import { Plus, Trash2, CheckCircle, AlertTriangle, Handshake, ZapOff, Siren, FileWarning } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, AlertTriangle, Handshake, ZapOff, Siren, FileWarning, Loader2 } from 'lucide-react';
 import * as StorageService from '../services/storage';
 
 const DebtManager: React.FC = () => {
   const [debts, setDebts] = useState<Debt[]>([]);
+  const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   
   // Form States
@@ -21,12 +21,19 @@ const DebtManager: React.FC = () => {
     loadDebts();
   }, []);
 
-  const loadDebts = () => {
-    const loaded = StorageService.getDebts();
-    setDebts(loaded);
+  const loadDebts = async () => {
+    setLoading(true);
+    try {
+        const loaded = await StorageService.getDebts();
+        setDebts(loaded);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setLoading(false);
+    }
   };
 
-  const handleAddDebt = (e: React.FormEvent) => {
+  const handleAddDebt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!creditor || !currentValue) return;
 
@@ -42,23 +49,27 @@ const DebtManager: React.FC = () => {
       dueDate: new Date(dueDate).toISOString()
     };
 
-    StorageService.saveDebt(newDebt);
-    loadDebts();
+    setLoading(true);
+    await StorageService.saveDebt(newDebt);
+    await loadDebts();
+    
     resetForm();
     setShowAddForm(false);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Tem certeza que deseja excluir este registro?')) {
-      StorageService.deleteDebt(id);
-      loadDebts();
+      setLoading(true);
+      await StorageService.deleteDebt(id);
+      await loadDebts();
     }
   };
 
-  const handleUpdateStatus = (debt: Debt, newStatus: DebtStatus) => {
+  const handleUpdateStatus = async (debt: Debt, newStatus: DebtStatus) => {
+    setLoading(true);
     const updated = { ...debt, status: newStatus };
-    StorageService.updateDebt(updated);
-    loadDebts();
+    await StorageService.updateDebt(updated);
+    await loadDebts();
   };
 
   const resetForm = () => {
@@ -100,11 +111,18 @@ const DebtManager: React.FC = () => {
         
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
+          disabled={loading}
+          className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50"
         >
           {showAddForm ? 'Cancelar' : <><Plus className="w-4 h-4" /> Novo Registro</>}
         </button>
       </div>
+
+      {loading && (
+          <div className="flex justify-center py-4">
+              <Loader2 className="w-6 h-6 animate-spin text-rose-500" />
+          </div>
+      )}
 
       {/* Summary Card */}
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 rounded-xl shadow-md border-t-4 border-rose-500 flex justify-between items-center">

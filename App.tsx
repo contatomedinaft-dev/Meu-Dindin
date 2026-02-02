@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Transaction, User, TransactionType, UserRole, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from './types';
 import * as StorageService from './services/storage';
@@ -7,7 +6,7 @@ import MonthlySheet from './components/MonthlySheet';
 import DebtManager from './components/DebtManager';
 import TransactionForm from './components/TransactionForm';
 import SettingsModal from './components/SettingsModal';
-import { Table2, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings, Upload, FileSpreadsheet } from 'lucide-react';
+import { Table2, Menu, X, Trash2, FileWarning, Plus, LogOut, UserCircle2, Pencil, Settings, Upload, FileSpreadsheet, RefreshCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
@@ -15,6 +14,7 @@ const App: React.FC = () => {
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'sheet' | 'debts'>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -49,14 +49,22 @@ const App: React.FC = () => {
     handleLogin(user);
   }, []);
 
-  const loadDataForUser = useCallback(() => {
-    const loaded = StorageService.getTransactions();
-    setTransactions(loaded);
+  const loadDataForUser = useCallback(async () => {
+    setLoading(true);
+    try {
+        const loaded = await StorageService.getTransactions();
+        setTransactions(loaded);
+    } catch (error) {
+        console.error("Erro ao carregar dados", error);
+    } finally {
+        setLoading(false);
+    }
   }, []);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     StorageService.saveUserSession(user);
+    // Trigger load
     loadDataForUser();
   };
 
@@ -67,48 +75,63 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     StorageService.logoutUser();
-    // Re-trigger initialization by reloading page or resetting state
     window.location.reload(); 
   };
 
-  const handleSaveSheetTransactions = (newTransactions: Transaction[], idsToDelete?: string[]) => {
+  const handleSaveSheetTransactions = async (newTransactions: Transaction[], idsToDelete?: string[]) => {
     if (!currentUser) return;
+    setLoading(true);
 
-    // 1. Remove replaced transactions (Editing logic)
-    if (idsToDelete && idsToDelete.length > 0) {
-        StorageService.deleteTransactions(idsToDelete);
+    try {
+        // 1. Remove replaced transactions
+        if (idsToDelete && idsToDelete.length > 0) {
+            await StorageService.deleteTransactions(idsToDelete);
+        }
+
+        // 2. Add new/updated transactions
+        const enriched = newTransactions.map(t => ({
+            ...t,
+            userId: currentUser.id,
+            userName: currentUser.name
+        }));
+
+        // Use bulk save if available or loop
+        await StorageService.saveTransactionsBulk(enriched);
+        
+        // 3. Reload
+        await loadDataForUser();
+    } catch (e) {
+        alert('Erro ao salvar planilha.');
+        console.error(e);
+        setLoading(false);
     }
-
-    // 2. Add new/updated transactions
-    const enriched = newTransactions.map(t => ({
-        ...t,
-        userId: currentUser.id,
-        userName: currentUser.name
-    }));
-
-    enriched.forEach(t => StorageService.saveTransaction(t));
-    
-    // 3. Reload
-    const updatedList = StorageService.getTransactions();
-    setTransactions(updatedList);
   };
 
-  const handleManualTransactionSave = (newTransactions: Transaction[]) => {
-      // Logic: Iterate through all incoming transactions.
-      // If a transaction matches the ID of the one we are editing, we UPDATE it.
-      // Any other transaction in the array (e.g., generated future installments) is treated as NEW.
-      
-      newTransactions.forEach(t => {
-          if (editingTransaction && t.id === editingTransaction.id) {
-              StorageService.updateTransaction(t);
-          } else {
-              StorageService.saveTransaction(t);
-          }
-      });
+  const handleManualTransactionSave = async (newTransactions: Transaction[]) => {
+      setLoading(true);
+      try {
+          const enriched = newTransactions.map(t => ({
+              ...t,
+              // Keep original user info if editing, else add current
+              userId: t.userId || currentUser?.id,
+              userName: t.userName || currentUser?.name
+          }));
 
-      const updatedList = StorageService.getTransactions();
-      setTransactions(updatedList);
-      setEditingTransaction(null);
+          // Se estiver editando um único item e ele for o único retornado
+          if (editingTransaction && enriched.length === 1 && enriched[0].id === editingTransaction.id) {
+             await StorageService.updateTransaction(enriched[0]);
+          } else {
+             // Saving multiple (recurrence) or new
+             await StorageService.saveTransactionsBulk(enriched);
+          }
+
+          await loadDataForUser();
+          setEditingTransaction(null);
+      } catch (e) {
+          alert('Erro ao salvar transação.');
+          console.error(e);
+          setLoading(false);
+      }
   };
 
   // --- EXCEL IMPORT LOGIC ---
@@ -200,9 +223,8 @@ const App: React.FC = () => {
         }
 
         if (importedCount > 0) {
-            newTransactions.forEach(t => StorageService.saveTransaction(t));
-            const updatedList = StorageService.getTransactions();
-            setTransactions(updatedList);
+            await StorageService.saveTransactionsBulk(newTransactions);
+            await loadDataForUser();
             alert(`${importedCount} transações importadas com sucesso! Vá ao extrato para categorizá-las.`);
             setActiveTab('list');
         } else {
@@ -219,16 +241,24 @@ const App: React.FC = () => {
   };
 
   // --- CATEGORY EDIT LOGIC ---
-  const handleQuickCategoryChange = (transaction: Transaction, newCategory: string) => {
+  const handleQuickCategoryChange = async (transaction: Transaction, newCategory: string) => {
+      // Optimistic Update
       const updated: Transaction = { ...transaction, category: newCategory };
-      StorageService.updateTransaction(updated);
-      // Update local state to reflect immediately
       setTransactions(prev => prev.map(t => t.id === transaction.id ? updated : t));
+      
+      // Async Save
+      try {
+        await StorageService.updateTransaction(updated);
+      } catch (e) {
+          console.error('Failed to update category', e);
+          // Revert if needed (omitted for simplicity)
+      }
   };
 
 
   const handleExportCSV = () => {
-    const csv = StorageService.exportToCSV();
+    // Pass current state transactions to export (already loaded)
+    const csv = StorageService.exportToCSV(transactions);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -248,12 +278,18 @@ const App: React.FC = () => {
     setTransactionToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (transactionToDelete) {
-      StorageService.deleteTransaction(transactionToDelete);
-      const updated = StorageService.getTransactions();
-      setTransactions(updated);
-      setTransactionToDelete(null);
+      setLoading(true);
+      try {
+          await StorageService.deleteTransaction(transactionToDelete);
+          await loadDataForUser();
+      } catch (e) {
+          alert('Erro ao excluir');
+      } finally {
+          setLoading(false);
+          setTransactionToDelete(null);
+      }
     }
   };
 
@@ -274,7 +310,7 @@ const App: React.FC = () => {
 
   // Loading state
   if (!currentUser) {
-    return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando...</div>;
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando usuário...</div>;
   }
 
   return (
@@ -354,6 +390,11 @@ const App: React.FC = () => {
                >
                  {isImporting ? <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div> : <FileSpreadsheet className="w-5 h-5" />}
                </button>
+               
+                {/* Sync Status Icon */}
+               <button onClick={loadDataForUser} title="Sincronizar Dados" className={`p-2 rounded-full hover:bg-gray-100 ${loading ? 'animate-spin text-blue-500' : 'text-gray-400'}`}>
+                   <RefreshCcw className="w-4 h-4" />
+               </button>
 
                {/* User Badge */}
                <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200">
@@ -429,8 +470,14 @@ const App: React.FC = () => {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
         
+        {loading && (
+            <div className="absolute top-0 left-0 w-full h-1 bg-gray-100 overflow-hidden z-50">
+                <div className="w-full h-full bg-blue-500 animate-progress origin-left-right"></div>
+            </div>
+        )}
+
         {activeTab === 'dashboard' && (
           <>
             <div className="mb-6 flex justify-between items-end">
