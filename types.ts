@@ -8,7 +8,7 @@ export const EXPENSE_CATEGORIES = [
   "Aluguel", "Água", "Luz/Energia", "Fatura Cartão de Crédito", "Financiamento Casa",
   "Financiamento Carro", "Despesas Carro", "Condomínio", "IPTU", "IPVA",
   "Telefone/Internet", "Netflix/Streaming", "Mercado", "Refeições fora",
-  "Plano de Saúde", "Academia", "Diarista", "Escola/Cursos", "Roupas",
+  "Lazer/Passeio", "Plano de Saúde", "Academia", "Diarista", "Escola/Cursos", "Roupas",
   "Combustível", "Seguro Auto", "Seguro Vida", "Reserva Viagem",
   "Reserva Emergência", "Petshop", "Despesas Bancárias", "Beleza/Barbeiro",
   "Saúde/Exames", "Farmácia", "Água Mineral", "Diversos"
